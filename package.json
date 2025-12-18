@@ -4,7 +4,7 @@
   "description": "Telegram Signal Bridge with Gemini AI",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node join_channel.js && node server.js",
     "dev": "nodemon server.js"
   },
   "dependencies": {
