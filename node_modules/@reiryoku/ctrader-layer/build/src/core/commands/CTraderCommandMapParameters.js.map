@@ -1,1 +1,0 @@
-{"version":3,"file":"CTraderCommandMapParameters.js","sourceRoot":"","sources":["../../../../src/core/commands/CTraderCommandMapParameters.ts"],"names":[],"mappings":"","sourcesContent":["export type CTraderCommandMapParameters = {\n    send: (...parameters: any[]) => void;\n};\n"]}
