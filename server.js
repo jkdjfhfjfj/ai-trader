@@ -10,10 +10,17 @@ require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+// 1. RENDER FIX: Enable CORS so your browser can talk to the server
+const io = new Server(server, {
+    cors: {
+        origin: "*", 
+        methods: ["GET", "POST"]
+    }
+});
+
 app.use(express.static('public'));
 
-// UPDATED TO GEMINI 2.0 FLASH
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const aiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" }); 
 
@@ -85,12 +92,20 @@ async function startBridge() {
     }
 
     io.on('connection', (socket) => {
+        // Send history to the new user
         messageHistory.forEach(msg => socket.emit('new_event', msg));
         checkHealth();
         socket.on('manual_recheck', () => checkHealth(true));
     });
 
     await client.connect();
+    console.log("✅ Telegram Connected Successfully");
+
+    // 2. RENDER FIX: Prevent the connection from sleeping during inactivity
+    setInterval(async () => {
+        try { await client.getMe(); } catch (e) { await client.connect(); }
+    }, 60000);
+
     const dialogs = await client.getDialogs({ limit: 10 });
     for (const d of dialogs) {
         const msgs = await client.getMessages(d.id, { limit: 5 });
@@ -101,4 +116,9 @@ async function startBridge() {
     setInterval(checkHealth, 30000);
 }
 
-server.listen(2000, () => startBridge().catch(console.error));
+// 3. RENDER FIX: Use dynamic port and bind to all interfaces (0.0.0.0)
+const PORT = process.env.PORT || 2000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server active on port ${PORT}`);
+    startBridge().catch(console.error);
+});
