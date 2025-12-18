@@ -1,0 +1,1 @@
+{"version":3,"file":"GenericObject.js","sourceRoot":"","sources":["../../../../src/core/utilities/GenericObject.ts"],"names":[],"mappings":"","sourcesContent":["export type GenericObject = {\n    [key: string]: any;\n};\n"]}

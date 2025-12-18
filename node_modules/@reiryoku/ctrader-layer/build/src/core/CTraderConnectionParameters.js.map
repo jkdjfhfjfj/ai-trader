@@ -1,0 +1,1 @@
+{"version":3,"file":"CTraderConnectionParameters.js","sourceRoot":"","sources":["../../../src/core/CTraderConnectionParameters.ts"],"names":[],"mappings":"","sourcesContent":["export type CTraderConnectionParameters = {\n    host: string;\n    port: number;\n};\n"]}
