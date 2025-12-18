@@ -8,7 +8,7 @@
         body { font-family: -apple-system, sans-serif; background: var(--bg); color: #c9d1d9; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         header { background: var(--card); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
         .status-group { display: flex; gap: 15px; align-items: center; }
-        .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #21262d; border: 1px solid var(--border); cursor: help; }
+        .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #21262d; border: 1px solid var(--border); cursor: help; text-transform: uppercase; font-weight: bold; }
         .online { color: var(--green); border-color: var(--green); }
         .offline { color: var(--red); border-color: var(--red); }
         .recheck-btn { background: var(--blue); color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
@@ -26,7 +26,6 @@
         .tp-item { color: var(--green); font-weight: bold; font-family: monospace; }
         .hidden { display: none; }
 
-        /* MODAL TOAST STYLING */
         #modal { position: fixed; top: 20px; right: 20px; padding: 15px 25px; border-radius: 8px; z-index: 1000; display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.5); animation: slideIn 0.3s ease; }
         @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
         .modal-success { background: var(--green); color: white; }
@@ -51,12 +50,23 @@
     </div>
 
     <main>
-        <div class="pane"><div class="pane-header">📜 ALL LOGS</div><div id="raw-feed" class="feed"></div></div>
-        <div class="pane"><div class="pane-header" style="color: var(--green)">🎯 VALIDATED SIGNALS</div><div id="signal-feed" class="feed"></div></div>
+        <div class="pane">
+            <div class="pane-header">📜 ALL LOGS</div>
+            <div id="raw-feed" class="feed"></div>
+        </div>
+        <div class="pane">
+            <div class="pane-header" style="color: var(--green)">🎯 VALIDATED SIGNALS</div>
+            <div id="signal-feed" class="feed"></div>
+        </div>
     </main>
 
     <script>
-        const socket = io();
+        // FIXED: Force polling first then upgrade to WebSocket for Render compatibility
+        const socket = io({
+            transports: ['polling', 'websocket'],
+            upgrade: true
+        });
+
         const seen = new Set();
 
         function showModal(msg, isError) {
@@ -67,11 +77,25 @@
             setTimeout(() => { m.style.display = 'none'; }, 4000);
         }
 
+        // Connection event
+        socket.on('connect', () => {
+            console.log("✅ Dashboard linked to Bridge");
+            showModal("Bridge Link Established", false);
+        });
+
+        // FIXED: Update Status Badges
         socket.on('system_status', d => {
             const tg = document.getElementById('tg-status');
             const ai = document.getElementById('ai-status');
-            tg.innerText = `TG: ${d.tg}`; tg.className = `badge ${d.tg.toLowerCase()}`; tg.title = d.tgErr || "Connected";
-            ai.innerText = `AI: ${d.ai}`; ai.className = `badge ${d.ai.toLowerCase()}`; ai.title = d.aiErr || "Active";
+            
+            tg.innerText = `TG: ${d.tg}`; 
+            tg.className = `badge ${d.tg.toLowerCase()}`;
+            tg.title = d.tgErr || "Connected";
+
+            ai.innerText = `AI: ${d.ai}`; 
+            ai.className = `badge ${d.ai.toLowerCase()}`;
+            ai.title = d.aiErr || "Active";
+
             document.getElementById('clock').innerText = d.time;
 
             if (d.isManual) {
@@ -81,27 +105,60 @@
             }
         });
 
+        // FIXED: Handle incoming signals and logs
         socket.on('new_event', (d) => {
-            const key = `${d.id}-${d.date}-${d.text.substring(0,10)}`;
-            if(seen.has(key)) return; seen.add(key);
+            // Deduplication
+            const key = `${d.id}-${d.date}-${d.text.substring(0,15)}`;
+            if(seen.has(key)) return; 
+            seen.add(key);
 
+            // 1. Create Raw Feed Card
             const r = document.createElement('div');
             r.className = 'card';
-            r.setAttribute('data-s', (d.title + d.text + d.id).toLowerCase());
-            r.innerHTML = `<div class="card-meta"><span style="color:var(--blue); font-weight:bold">${d.title}</span><span>${d.isSync ? '<span class="sync-tag">SYNCED</span> ' : ''}${d.date}</span></div><div>${d.text}</div><div style="font-size:10px; color:#484f58; margin-top:5px;">ID: ${d.id} | Result: ${d.analysis.reason}</div>`;
+            r.setAttribute('data-s', (d.title + d.text + (d.id || '')).toLowerCase());
+            
+            const analysisText = d.analysis ? `Result: ${d.analysis.is_signal ? 'SIGNAL' : 'IGNORED'}` : 'Processing...';
+            
+            r.innerHTML = `
+                <div class="card-meta">
+                    <span style="color:var(--blue); font-weight:bold">${d.title || 'Unknown Channel'}</span>
+                    <span>${d.isSync ? '<span class="sync-tag">SYNCED</span> ' : ''}${d.date}</span>
+                </div>
+                <div>${d.text}</div>
+                <div style="font-size:10px; color:#484f58; margin-top:5px;">${analysisText}</div>
+            `;
             document.getElementById('raw-feed').prepend(r);
 
-            if(d.analysis.is_signal) {
+            // 2. Create Signal Card if valid
+            if(d.analysis && d.analysis.is_signal) {
                 const s = document.createElement('div');
                 s.className = 'card sig-card';
-                const tps = d.analysis.tp.map((t, i) => `<div class="tp-item">TP${i+1}: ${t}</div>`).join('');
-                s.innerHTML = `<div class="card-meta"><span>CONF: ${d.analysis.confidence}%</span><span>${d.date}</span></div><div style="font-size:16px; font-weight:bold; color:var(--blue); margin-bottom:5px;">${d.analysis.action} ${d.analysis.pair}</div><div style="color:var(--red); font-weight:bold">SL: ${d.analysis.sl}</div><div class="tp-grid">${tps}</div>`;
+                
+                // Safety check for TP array
+                const tpList = Array.isArray(d.analysis.tp) ? d.analysis.tp : [];
+                const tps = tpList.map((t, i) => `<div class="tp-item">TP${i+1}: ${t}</div>`).join('');
+                
+                s.innerHTML = `
+                    <div class="card-meta">
+                        <span>CONF: ${d.analysis.confidence || 0}%</span>
+                        <span>${d.date}</span>
+                    </div>
+                    <div style="font-size:16px; font-weight:bold; color:var(--blue); margin-bottom:5px;">
+                        ${d.analysis.action} ${d.analysis.pair}
+                    </div>
+                    <div style="color:var(--red); font-weight:bold">SL: ${d.analysis.sl}</div>
+                    <div class="tp-grid">${tps}</div>
+                `;
                 document.getElementById('signal-feed').prepend(s);
             }
             doSearch();
         });
 
-        function recheck() { socket.emit('manual_recheck'); }
+        function recheck() { 
+            socket.emit('manual_recheck'); 
+            showModal("Requesting System Recheck...", false);
+        }
+
         function doSearch() {
             const q = document.getElementById('filter').value.toLowerCase();
             document.querySelectorAll('#raw-feed .card').forEach(c => {
