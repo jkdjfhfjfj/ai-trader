@@ -8,8 +8,8 @@
         body { font-family: -apple-system, sans-serif; background: var(--bg); color: #c9d1d9; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         header { background: var(--card); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
         .status-group { display: flex; gap: 15px; align-items: center; }
-        .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #21262d; border: 1px solid var(--border); cursor: help; text-transform: uppercase; font-weight: bold; }
-        .online { color: var(--green); border-color: var(--green); }
+        .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #21262d; border: 1px solid var(--border); transition: 0.3s; }
+        .online { color: var(--green); border-color: var(--green); box-shadow: 0 0 5px rgba(63, 185, 80, 0.3); }
         .offline { color: var(--red); border-color: var(--red); }
         .recheck-btn { background: var(--blue); color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
         .search-area { padding: 10px 20px; background: var(--bg); flex-shrink: 0; }
@@ -18,16 +18,15 @@
         .pane { background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
         .pane-header { padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--border); font-weight: bold; font-size: 14px; }
         .feed { overflow-y: auto; padding: 15px; flex-grow: 1; }
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 12px; font-size: 13px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 12px; font-size: 13px; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         .sig-card { border-left: 4px solid var(--green); }
         .card-meta { display: flex; justify-content: space-between; font-size: 11px; color: #8b949e; margin-bottom: 8px; }
         .sync-tag { color: var(--orange); font-weight: bold; border: 1px solid var(--orange); padding: 0 4px; border-radius: 3px; font-size: 10px; }
         .tp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 8px; }
         .tp-item { color: var(--green); font-weight: bold; font-family: monospace; }
         .hidden { display: none; }
-
-        #modal { position: fixed; top: 20px; right: 20px; padding: 15px 25px; border-radius: 8px; z-index: 1000; display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.5); animation: slideIn 0.3s ease; }
-        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        #modal { position: fixed; top: 20px; right: 20px; padding: 15px 25px; border-radius: 8px; z-index: 1000; display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         .modal-success { background: var(--green); color: white; }
         .modal-error { background: var(--red); color: white; }
     </style>
@@ -46,7 +45,7 @@
     </header>
 
     <div class="search-area">
-        <input type="text" id="filter" placeholder="🔍 Search Logs..." onkeyup="doSearch()">
+        <input type="text" id="filter" placeholder="🔍 Search Logs (Channel, Pair, ID)..." onkeyup="doSearch()">
     </div>
 
     <main>
@@ -61,10 +60,10 @@
     </main>
 
     <script>
-        // FIXED: Force polling first then upgrade to WebSocket for Render compatibility
+        // Use a relative path to ensure the socket works on the Render proxy
         const socket = io({
             transports: ['polling', 'websocket'],
-            upgrade: true
+            reconnectionAttempts: 10
         });
 
         const seen = new Set();
@@ -74,73 +73,67 @@
             m.innerText = msg;
             m.className = isError ? 'modal-error' : 'modal-success';
             m.style.display = 'block';
-            setTimeout(() => { m.style.display = 'none'; }, 4000);
+            setTimeout(() => { m.style.display = 'none'; }, 5000);
         }
 
-        // Connection event
+        // Connection events
         socket.on('connect', () => {
-            console.log("✅ Dashboard linked to Bridge");
-            showModal("Bridge Link Established", false);
+            console.log("Connected to server");
+            showModal("✅ Link Established: Dashboard Connected", false);
         });
 
-        // FIXED: Update Status Badges
+        socket.on('connect_error', (err) => {
+            console.error("Connection error:", err);
+            // This is critical for Render Free tier
+            if (err.message === "xhr poll error") {
+                showModal("❌ Port/Proxy Error. Server may be sleeping.", true);
+            }
+        });
+
         socket.on('system_status', d => {
             const tg = document.getElementById('tg-status');
             const ai = document.getElementById('ai-status');
             
-            tg.innerText = `TG: ${d.tg}`; 
-            tg.className = `badge ${d.tg.toLowerCase()}`;
-            tg.title = d.tgErr || "Connected";
-
-            ai.innerText = `AI: ${d.ai}`; 
-            ai.className = `badge ${d.ai.toLowerCase()}`;
-            ai.title = d.aiErr || "Active";
-
+            // Update Text and Color
+            tg.innerText = `TG: ${d.tg}`;
+            tg.className = `badge ${d.tg === 'ONLINE' ? 'online' : 'offline'}`;
+            
+            ai.innerText = `AI: ${d.ai}`;
+            ai.className = `badge ${d.ai === 'ONLINE' ? 'online' : 'offline'}`;
+            
             document.getElementById('clock').innerText = d.time;
-
-            if (d.isManual) {
-                const hasError = d.tg === 'OFFLINE' || d.ai === 'OFFLINE';
-                const msg = hasError ? `⚠️ Issue: ${d.tgErr || d.aiErr}` : "✅ All Systems Active";
-                showModal(msg, hasError);
-            }
         });
 
-        // FIXED: Handle incoming signals and logs
         socket.on('new_event', (d) => {
-            // Deduplication
-            const key = `${d.id}-${d.date}-${d.text.substring(0,15)}`;
-            if(seen.has(key)) return; 
+            // Prevent duplicates
+            const key = `${d.id}-${d.text.substring(0,20)}`;
+            if(seen.has(key)) return;
             seen.add(key);
 
-            // 1. Create Raw Feed Card
+            // RAW LOG FEED
             const r = document.createElement('div');
             r.className = 'card';
-            r.setAttribute('data-s', (d.title + d.text + (d.id || '')).toLowerCase());
-            
-            const analysisText = d.analysis ? `Result: ${d.analysis.is_signal ? 'SIGNAL' : 'IGNORED'}` : 'Processing...';
-            
+            r.setAttribute('data-s', (d.title + d.text + d.id).toLowerCase());
             r.innerHTML = `
                 <div class="card-meta">
-                    <span style="color:var(--blue); font-weight:bold">${d.title || 'Unknown Channel'}</span>
+                    <span style="color:var(--blue); font-weight:bold">${d.title}</span>
                     <span>${d.isSync ? '<span class="sync-tag">SYNCED</span> ' : ''}${d.date}</span>
                 </div>
-                <div>${d.text}</div>
-                <div style="font-size:10px; color:#484f58; margin-top:5px;">${analysisText}</div>
+                <div style="line-height:1.4">${d.text}</div>
+                <div style="font-size:10px; color:#484f58; margin-top:8px;">
+                    ID: ${d.id} | Confidence: ${d.analysis?.confidence || 0}%
+                </div>
             `;
             document.getElementById('raw-feed').prepend(r);
 
-            // 2. Create Signal Card if valid
+            // SIGNAL FEED
             if(d.analysis && d.analysis.is_signal) {
                 const s = document.createElement('div');
                 s.className = 'card sig-card';
-                
-                // Safety check for TP array
-                const tpList = Array.isArray(d.analysis.tp) ? d.analysis.tp : [];
-                const tps = tpList.map((t, i) => `<div class="tp-item">TP${i+1}: ${t}</div>`).join('');
-                
+                const tps = d.analysis.tp.map((t, i) => `<div class="tp-item">TP${i+1}: ${t}</div>`).join('');
                 s.innerHTML = `
                     <div class="card-meta">
-                        <span>CONF: ${d.analysis.confidence || 0}%</span>
+                        <span>CONF: ${d.analysis.confidence}%</span>
                         <span>${d.date}</span>
                     </div>
                     <div style="font-size:16px; font-weight:bold; color:var(--blue); margin-bottom:5px;">
@@ -151,12 +144,11 @@
                 `;
                 document.getElementById('signal-feed').prepend(s);
             }
-            doSearch();
         });
 
         function recheck() { 
             socket.emit('manual_recheck'); 
-            showModal("Requesting System Recheck...", false);
+            showModal("🔄 Refreshing system status...", false);
         }
 
         function doSearch() {
@@ -167,4 +159,4 @@
         }
     </script>
 </body>
-</html>
+    </html>
